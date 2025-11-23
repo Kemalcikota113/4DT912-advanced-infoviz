@@ -25,7 +25,7 @@ print(f"\nFaculties: {df['faculty'].nunique()}")
 print(df['faculty'].unique())
 print("\n")
 
-# Create comprehensive visualization dashboard
+# Create comprehensive visualization dashboard with all plots
 fig = make_subplots(
     rows=3, cols=2,
     subplot_titles=(
@@ -33,15 +33,15 @@ fig = make_subplots(
         'Publications Over Time by Faculty',
         'Publication Distribution (Histogram)',
         'Top 15 Most Productive Researchers',
-        'Average Publications per Department by Year',
-        'Department Contribution by Faculty'
+        'Individual Publications by Year and Department',
+        'Hierarchical Treemap: Faculty → Department → Researcher'
     ),
     specs=[
         [{"type": "bar"}, {"type": "scatter"}],
         [{"type": "histogram"}, {"type": "bar"}],
-        [{"type": "scatter"}, {"type": "bar"}]
+        [{"type": "scatter"}, {"type": "treemap"}]
     ],
-    vertical_spacing=0.12,
+    vertical_spacing=0.10,
     horizontal_spacing=0.12
 )
 
@@ -100,34 +100,67 @@ fig.add_trace(
     row=2, col=2
 )
 
-# 5. Average Publications per Department by Year
-dept_year_avg = df.groupby(['year', 'department'])['pubs'].mean().reset_index()
+# 5. Scatter plot for individual analysis
 for dept in df['department'].unique():
-    dept_data = dept_year_avg[dept_year_avg['department'] == dept]
+    dept_data = df[df['department'] == dept]
     fig.add_trace(
         go.Scatter(
             x=dept_data['year'],
             y=dept_data['pubs'],
-            mode='lines+markers',
-            name=dept.split('(')[1].replace(')', ''),
-            hovertemplate='<b>%{fullData.name}</b><br>Year: %{x}<br>Avg Pubs: %{y:.2f}<extra></extra>'
+            mode='markers',
+            name=dept.split('(')[0].strip(),
+            marker=dict(size=dept_data['pubs'], sizemode='diameter', sizeref=0.5, sizemin=3),
+            text=dept_data['name'],
+            hovertemplate='<b>%{text}</b><br>Year: %{x}<br>Publications: %{y}<extra></extra>'
         ),
         row=3, col=1
     )
 
-# 6. Department Contribution by Faculty
-faculty_dept = df.groupby(['faculty', 'department'])['pubs'].sum().reset_index()
-for faculty in df['faculty'].unique():
-    faculty_data = faculty_dept[faculty_dept['faculty'] == faculty]
-    fig.add_trace(
-        go.Bar(
-            x=[d.split('(')[0].strip() for d in faculty_data['department']],
-            y=faculty_data['pubs'],
-            name=faculty.split('(')[1].replace(')', ''),
-            hovertemplate='<b>%{fullData.name}</b><br>%{x}<br>Publications: %{y}<extra></extra>'
+# 6. Treemap for hierarchical view
+sunburst_data = df.groupby(['faculty', 'department', 'name'])['pubs'].sum().reset_index()
+
+# Create labels and parents for treemap
+labels = ['PSU']
+parents = ['']
+values = [0]
+colors = [0]
+
+for faculty in sunburst_data['faculty'].unique():
+    labels.append(faculty.split('(')[0].strip())
+    parents.append('PSU')
+    faculty_total = sunburst_data[sunburst_data['faculty'] == faculty]['pubs'].sum()
+    values.append(faculty_total)
+    colors.append(faculty_total)
+    
+    for dept in sunburst_data[sunburst_data['faculty'] == faculty]['department'].unique():
+        dept_name = dept.split('(')[0].strip()
+        labels.append(dept_name)
+        parents.append(faculty.split('(')[0].strip())
+        dept_total = sunburst_data[sunburst_data['department'] == dept]['pubs'].sum()
+        values.append(dept_total)
+        colors.append(dept_total)
+        
+        dept_data = sunburst_data[sunburst_data['department'] == dept]
+        for _, row in dept_data.iterrows():
+            labels.append(row['name'])
+            parents.append(dept_name)
+            values.append(row['pubs'])
+            colors.append(row['pubs'])
+
+fig.add_trace(
+    go.Treemap(
+        labels=labels,
+        parents=parents,
+        values=values,
+        marker=dict(
+            colorscale='RdYlGn',
+            cmid=sum(colors)/len(colors),
+            colorbar=dict(title="Publications")
         ),
-        row=3, col=2
-    )
+        hovertemplate='<b>%{label}</b><br>Publications: %{value}<extra></extra>'
+    ),
+    row=3, col=2
+)
 
 # Update layout
 fig.update_layout(
@@ -145,83 +178,16 @@ fig.update_xaxes(title_text="Year", row=1, col=2)
 fig.update_xaxes(title_text="Number of Publications", row=2, col=1)
 fig.update_xaxes(title_text="Total Publications", row=2, col=2)
 fig.update_xaxes(title_text="Year", row=3, col=1)
-fig.update_xaxes(title_text="Department", row=3, col=2)
 
 fig.update_yaxes(title_text="Department", row=1, col=1)
 fig.update_yaxes(title_text="Publications", row=1, col=2)
 fig.update_yaxes(title_text="Frequency", row=2, col=1)
 fig.update_yaxes(title_text="Researcher", row=2, col=2)
-fig.update_yaxes(title_text="Avg Publications", row=3, col=1)
-fig.update_yaxes(title_text="Publications", row=3, col=2)
+fig.update_yaxes(title_text="Publications", row=3, col=1)
 
-# Save the visualization
+# Save the comprehensive dashboard
 fig.write_html('publications_dashboard.html')
-print("Dashboard saved as 'publications_dashboard.html'")
-
-# Create an interactive sunburst diagram for hierarchical view
-sunburst_data = df.groupby(['faculty', 'department', 'name'])['pubs'].sum().reset_index()
-
-fig_sunburst = px.sunburst(
-    sunburst_data,
-    path=['faculty', 'department', 'name'],
-    values='pubs',
-    title='<b>Hierarchical View: Faculty → Department → Researcher</b>',
-    color='pubs',
-    color_continuous_scale='Viridis',
-    hover_data={'pubs': ':,'}
-)
-
-fig_sunburst.update_layout(
-    height=800,
-    title_x=0.5,
-    title_font_size=20
-)
-
-fig_sunburst.write_html('publications_sunburst.html')
-print("Sunburst diagram saved as 'publications_sunburst.html'")
-
-# Create a treemap for another hierarchical perspective
-fig_treemap = px.treemap(
-    sunburst_data,
-    path=['faculty', 'department', 'name'],
-    values='pubs',
-    title='<b>Treemap View: Faculty → Department → Researcher</b>',
-    color='pubs',
-    color_continuous_scale='RdYlGn',
-    hover_data={'pubs': ':,'}
-)
-
-fig_treemap.update_layout(
-    height=800,
-    title_x=0.5,
-    title_font_size=20
-)
-
-fig_treemap.write_html('publications_treemap.html')
-print("Treemap saved as 'publications_treemap.html'")
-
-# Create scatter plot for individual analysis
-fig_scatter = px.scatter(
-    df,
-    x='year',
-    y='pubs',
-    color='department',
-    hover_data=['name', 'faculty'],
-    title='<b>Individual Publications by Year and Department</b>',
-    labels={'pubs': 'Number of Publications', 'year': 'Year'},
-    size='pubs',
-    size_max=15
-)
-
-fig_scatter.update_layout(
-    height=700,
-    title_x=0.5,
-    title_font_size=20,
-    hovermode='closest'
-)
-
-fig_scatter.write_html('publications_scatter.html')
-print("Scatter plot saved as 'publications_scatter.html'")
+print("Comprehensive dashboard saved as 'publications_dashboard.html'")
 
 # Generate summary statistics
 print("\n" + "=" * 60)
@@ -244,5 +210,5 @@ year_stats.columns = ['Total', 'Average', 'Researchers']
 print(year_stats)
 
 print("\n" + "=" * 60)
-print("Visualization complete! Open the HTML files in a browser to view.")
+print("Visualization complete! Open 'publications_dashboard.html' to view all plots.")
 print("=" * 60)
